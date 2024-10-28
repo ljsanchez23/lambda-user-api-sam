@@ -1,0 +1,7 @@
+{
+    "httpMethod": "DELETE",
+    "path": "/users/12345",
+    "pathParameters": {
+      "id": "12345"
+    }
+  }

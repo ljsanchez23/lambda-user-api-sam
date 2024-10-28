@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda User API
+Transform:
+- AWS::Serverless-2016-10-31
+Resources:
+  UserApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+  Users:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Users
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  UserQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: UserCreationQueue
+  UserQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: UserQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: '*'
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - UserQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+                Fn::GetAtt:
+                - CreateUserFunction
+                - Arn
+  UserNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: UserNotificationTopic
+      Subscription:
+      - Protocol: email
+        Endpoint: ljsanchez23@hotmail.com
+  UserNotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+      - Ref: UserNotificationTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: '*'
+          Action: sns:Publish
+          Resource:
+            Ref: UserNotificationTopic
+  GetUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-users.handler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          USERS_TABLE:
+            Ref: Users
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: Users
+      Events:
+        GetUsers:
+          Type: Api
+          Properties:
+            Path: /users
+            Method: GET
+            RestApiId:
+              Ref: UserApi
+      CodeUri: GetUsersFunction
+    Metadata:
+      SamResourceId: GetUsersFunction
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-user.handler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          USERS_TABLE:
+            Ref: Users
+          USER_QUEUE_URL:
+            Ref: UserQueue
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: Users
+      - Statement:
+          Effect: Allow
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - UserQueue
+            - Arn
+      Events:
+        CreateUser:
+          Type: Api
+          Properties:
+            Path: /users
+            Method: POST
+            RestApiId:
+              Ref: UserApi
+      CodeUri: CreateUserFunction
+    Metadata:
+      SamResourceId: CreateUserFunction
+  UpdateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/update-user.handler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          USERS_TABLE:
+            Ref: Users
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: Users
+      Events:
+        UpdateUser:
+          Type: Api
+          Properties:
+            Path: /users/{id}
+            Method: PUT
+            RestApiId:
+              Ref: UserApi
+      CodeUri: UpdateUserFunction
+    Metadata:
+      SamResourceId: UpdateUserFunction
+  DeleteUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/delete-user.handler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          USERS_TABLE:
+            Ref: Users
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: Users
+      Events:
+        DeleteUser:
+          Type: Api
+          Properties:
+            Path: /users/{id}
+            Method: DELETE
+            RestApiId:
+              Ref: UserApi
+      CodeUri: DeleteUserFunction
+    Metadata:
+      SamResourceId: DeleteUserFunction
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/send-email.handler
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN:
+            Ref: UserNotificationTopic
+      Policies:
+      - Statement:
+          Effect: Allow
+          Action: sns:Publish
+          Resource:
+            Ref: UserNotificationTopic
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - UserQueue
+              - Arn
+            BatchSize: 1
+      CodeUri: SendEmailFunction
+    Metadata:
+      SamResourceId: SendEmailFunction
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${UserApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
